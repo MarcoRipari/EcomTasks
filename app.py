@@ -4,6 +4,7 @@ from flask import session, redirect, url_for, request
 import dash
 from dash import html, dcc
 import dash_bootstrap_components as dbc
+from dash.dependencies import Output, Input, State, ALL
 import datetime
 import google.oauth2.credentials
 import google_auth_oauthlib.flow
@@ -30,15 +31,35 @@ app = dash.Dash(
 
 # Dash layout
 app.layout = dbc.Container([
-    html.H2("Dashboard Google Calendar/Tasks"),
+    html.H2("📅 Dashboard Google Calendar & Tasks"),
     html.Div(id="login-status"),
     html.Hr(),
+
     dbc.Row([
-        dbc.Col([html.H4("Appuntamenti di oggi"), html.Div(id="calendar-events")], md=6),
-        dbc.Col([html.H4("Task di oggi"), html.Div(id="tasks-list")], md=6)
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader("Appuntamenti di oggi"),
+                dbc.CardBody(html.Div(id="calendar-events"))
+            ])
+        ], md=6),
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader("Task di oggi"),
+                dbc.CardBody([
+                    html.Div(id="tasks-list"),
+                    html.Br(),
+                    dbc.InputGroup([
+                        dbc.Input(id="new-task-title", placeholder="Nuovo task..."),
+                        dbc.Button("Aggiungi", id="add-task-btn", color="primary", n_clicks=0)
+                    ])
+                ])
+            ])
+        ], md=6)
     ]),
+
     dcc.Interval(id='interval', interval=5*60*1000, n_intervals=0)
 ], fluid=True)
+
 
 # Flask endpoints per OAuth
 @server.route("/login")
@@ -136,6 +157,75 @@ def update_dashboard(n):
         dbc.ListGroup(event_list),
         dbc.ListGroup(task_list)
     )
+
+@app.callback(
+    Output('tasks-list', 'children'),
+    Input('interval', 'n_intervals'),
+    Input({'type': 'complete-task', 'index': ALL}, 'value'),
+    State('tasks-list', 'children')
+)
+def update_tasks(n_intervals, completed_values, current_tasks_ui):
+    if 'credentials' not in session:
+        return html.P("Non autenticato.")
+    
+    creds = google.oauth2.credentials.Credentials(**session['credentials'])
+    tasks_service = googleapiclient.discovery.build('tasks', 'v1', credentials=creds)
+
+    # Recupera lista
+    tasks_list = tasks_service.tasks().list(tasklist='@default').execute()
+    today = datetime.datetime.utcnow().date()
+    task_elements = []
+
+    for i, task in enumerate(tasks_list.get('items', [])):
+        due = task.get('due')
+        if due:
+            due_date = datetime.datetime.fromisoformat(due[:-1]).date()
+            if due_date == today and not task.get('status') == 'completed':
+                checkbox_id = {'type': 'complete-task', 'index': task['id']}
+                if completed_values and task['id'] in completed_values:
+                    tasks_service.tasks().update(
+                        tasklist='@default',
+                        task=task['id'],
+                        body={'status': 'completed'}
+                    ).execute()
+                    continue
+                task_elements.append(
+                    dbc.Checkbox(
+                        id=checkbox_id,
+                        label=task['title'],
+                        value=False,
+                        style={"marginBottom": "0.5rem"}
+                    )
+                )
+
+    if not task_elements:
+        return html.P("Nessun task per oggi.")
+
+    return task_elements
+
+@app.callback(
+    Output('new-task-title', 'value'),
+    Input('add-task-btn', 'n_clicks'),
+    State('new-task-title', 'value')
+)
+def add_new_task(n_clicks, task_title):
+    if n_clicks and task_title:
+        if 'credentials' not in session:
+            return ""
+
+        creds = google.oauth2.credentials.Credentials(**session['credentials'])
+        tasks_service = googleapiclient.discovery.build('tasks', 'v1', credentials=creds)
+
+        tasks_service.tasks().insert(
+            tasklist='@default',
+            body={
+                'title': task_title,
+                'due': datetime.datetime.utcnow().date().isoformat() + 'T00:00:00.000Z'
+            }
+        ).execute()
+        return ""  # reset input
+    return task_title
+
 
 if __name__ == "__main__":
     app.run_server(debug=True)
