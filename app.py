@@ -107,10 +107,14 @@ def dash_redirect():
 
 # Dash callback per UI e dati
 @app.callback(
-    dash.dependencies.Output('login-status', 'children'),
-    dash.dependencies.Output('calendar-events', 'children'),
-    dash.dependencies.Output('tasks-list', 'children'),
-    dash.dependencies.Input('interval', 'n_intervals')
+    #dash.dependencies.Output('login-status', 'children'),
+    #dash.dependencies.Output('calendar-events', 'children'),
+    #dash.dependencies.Output('tasks-list', 'children'),
+    #dash.dependencies.Input('interval', 'n_intervals')
+    Output('login-status', 'children'),
+    Output('calendar-events', 'children'),
+    Output('tasks-list', 'children'),
+    Input('interval', 'n_intervals')
 )
 def update_dashboard(n):
     if 'credentials' not in session:
